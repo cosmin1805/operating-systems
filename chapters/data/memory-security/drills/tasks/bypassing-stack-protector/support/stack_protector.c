@@ -20,7 +20,7 @@ void fun1(char *p)
 
 	printf("overwrite canary:\n");
 	// TODO(Student): Add code that overwrites the canary
-
+	
 	printf("overwrite return address:\n");
 	// TODO(Student): Add code that overwrites the return address with the addess of pawned
 
