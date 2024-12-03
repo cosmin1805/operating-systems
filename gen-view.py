@@ -88,7 +88,7 @@ def group_guides():
                     os.popen(f"cp {os.path.join(root, f)} {guidesDir}/{guideName}.md")
 
 
-def setup_overview(fileToLab: dict):
+def setup_overview():
     """
     Copy the overview.md file for each chapter to the .view directory.
     """
@@ -108,12 +108,13 @@ def setup_overview(fileToLab: dict):
 
         with open(f"{viewDir}/{c}-overview.md") as f:
             text = f.read()
-            text = solve_links(text, fileToLab)
         with open(f"{viewDir}/{c}-overview.md", "w") as f:
             f.write(text)
 
+    print()  # Add a newline for better readability
 
-def solve_links(text: str, fileToLab: dict) -> str:
+
+def solve_links(filename: str, fileToLab: dict) -> str:
     """
     Make relative links work in the final markdown file.
 
@@ -123,19 +124,29 @@ def solve_links(text: str, fileToLab: dict) -> str:
         The lab number is determined by the fileToLab dictionary, and the subchapter is the first line of the file.
         For example, [text](../reading/basic-syscall.md) will become [text](.view/lab1#basic-syscall).
     """
+    with open(filename) as f:
+        text = f.read()
+
     # Questions from the same chapter are at Questions/<question>, without the .md extension
-    text = re.sub(r"(\[.*\])\(.*questions/(.*)\.md\)", r"\1(Questions/\2)", text)
+    text = re.sub(r"(\[.*?\])\(.*?questions/(.*?)\.md\)", r"\1(Questions/\2)", text)
 
     # Remove relative links to reading, media, tasks, and guides
     for section in ["reading", "media", "tasks", "guides"]:
+        # Questions are placed in a directory of their own, just like media, so we need to go up one level
+        if "questions" in filename and section == "media":
+            section = "../" + section
         text = re.sub(
-            r"(\[.*\])\(.*" + section + r"/(.*)\)", rf"\1({section}/\2)", text
+            r"(\[.*?\])\([^\)]*" + section + r"/(.*?)\)", rf"\1({section}/\2)", text
         )
 
     # Reading links [text](.*/reading/<file>.md) should be replaced with [text](.view/labQ#<chapter>)
     # Where Q is the lab number and chapter is the heading of the file
-    matches = re.findall(r"\[.*\]\((.*\.md)\)", text)
+    matches = re.findall(r"\[[^\]]*\]\(([^\)]+\.md)\)", text)
     for sourceFile in matches:
+        origName = sourceFile  # Save the original name for the regex
+        if sourceFile.endswith("README.md"):
+            sourceFile = os.path.dirname(sourceFile) + ".md"
+
         filepath = os.path.join(viewDir, sourceFile)
 
         # Tasks and guides are prefixed with the section name
@@ -152,26 +163,57 @@ def solve_links(text: str, fileToLab: dict) -> str:
                 title = f.readline().strip("#").replace("`", "").replace(":", "")
                 subchapter = prefix + hypenate(title)
         except:
-            print(f"Error: Could not solve link to {filepath}")
+            print(f"Error: Could not solve link to {filepath} for {filename}")
             continue
 
         text = re.sub(
-            rf"(\[.*\])\({sourceFile}\)",
+            rf"(\[.*\])\({origName}\)",  # Use origName because tasks 'sourceFile' has changed
             rf"\1({fileToLab[sourceFile]}#{subchapter})",
             text,
         )
 
-    return text
+    with open(filename, "w") as f:
+        f.write(text)
+
+
+def find_broken_links():
+    """
+    Find potentially broken links in the markdown file.
+    """
+    prefixes = ["lab", "media", "tasks", "Questions", "reading", "guides", "http"]
+
+    for root, _, files in os.walk(viewDir):
+        for f in files:
+            if "lab" in f:  # Skip lab files, check source files only
+                continue
+
+            if f.endswith(".md"):
+                with open(os.path.join(root, f)) as f:
+                    text = f.read()
+
+                # Find all links that do not point to a markdown file
+                matches = re.findall(r"\[[^\]]*\]\(([^\)]+)\)", text)
+                for link in matches:
+                    # Questions media links corner case
+                    isValidQMediaLink = "questions" in root and link.startswith(
+                        "../media/"
+                    )
+
+                    if (
+                        not any([link.startswith(p) for p in prefixes])
+                    ) and not isValidQMediaLink:
+                        print(f"Possibly broken link in {f.name}: ({link})")
 
 
 class Lab:
     def __init__(self, title: str, filename: str, content: List[str]):
-        self.title = title
-        self.filename = filename
-
         self.text = f"# {title}\n\n"
         for file in content:
             self.process_file(file)
+
+        print(f"Generating lab {viewDir}/{filename}")
+        with open(f"{viewDir}/{filename}", "w") as f:
+            f.write(self.text)
 
     def process_file(self, filename: str):
         """
@@ -195,17 +237,6 @@ class Lab:
         filecontent = re.sub(r"^(#+)", r"\1#", filecontent, flags=re.MULTILINE)
         self.text += filecontent + "\n\n"
 
-    def generate(self, fileToLab: dict):
-        """
-        Generate the final markdown file for the lab.
-        """
-        print(f"Generating lab {viewDir}/{self.filename}")
-
-        self.text = solve_links(self.text, fileToLab)
-
-        with open(f"{viewDir}/{self.filename}", "w") as f:
-            f.write(self.text)
-
 
 class ConfigParser:
     def __init__(self, path):
@@ -213,11 +244,10 @@ class ConfigParser:
         with open(path) as f:
             self.data = yaml.safe_load(f)
 
-    def create_labs(self) -> List[Lab]:
-        labs = []
+    def create_labs(self):
         for entry in self.data["lab_structure"]:
-            labs.append(Lab(entry["title"], entry["filename"], entry["content"]))
-        return labs
+            Lab(entry["title"], entry["filename"], entry["content"])
+        print()  # Add a newline for better readability
 
     def get_file_to_lab_dict(self) -> dict:
         """
@@ -254,12 +284,19 @@ def main():
 
     # Parse the config file
     config = ConfigParser("config.yaml")
-    labs = config.create_labs()
-    for lab in labs:
-        lab.generate(config.get_file_to_lab_dict())
+    config.create_labs()
 
     # Copy the overview.md file for each chapter to the .view directory
-    setup_overview(config.get_file_to_lab_dict())
+    setup_overview()
+
+    # Solve links recursively in all markdown files
+    for root, _, files in os.walk(viewDir):
+        for f in files:
+            if f.endswith(".md"):
+                solve_links(os.path.join(root, f), config.get_file_to_lab_dict())
+
+    # Check for broken links
+    find_broken_links()
 
 
 if __name__ == "__main__":
