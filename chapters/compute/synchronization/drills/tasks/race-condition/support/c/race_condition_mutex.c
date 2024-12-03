@@ -15,12 +15,13 @@ void *increment_var(void *arg)
 {
 	(void)arg;
 
+	// TODO: wrap the whole `for` statement in the critical section and measure
+	// the running times.
+	pthread_mutex_lock(&mutex);
 	for (size_t i = 0; i < NUM_ITER; i++) {
-		pthread_mutex_lock(&mutex);
-		val++;
-		pthread_mutex_unlock(&mutex);
+		val++;	
 	}
-
+pthread_mutex_unlock(&mutex);
 	return NULL;
 }
 
@@ -28,12 +29,13 @@ void *decrement_var(void *arg)
 {
 	(void)arg;
 
+	// TODO: wrap the whole `for` statement in the critical section and measure
+	// the running times.
+	pthread_mutex_lock(&mutex);
 	for (size_t i = 0; i < NUM_ITER; i++) {
-		pthread_mutex_lock(&mutex);
 		val--;
-		pthread_mutex_unlock(&mutex);
 	}
-
+	pthread_mutex_unlock(&mutex);
 	return NULL;
 }
 
